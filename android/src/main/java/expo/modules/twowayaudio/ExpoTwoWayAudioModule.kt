@@ -1,6 +1,5 @@
 package expo.modules.twowayaudio
 
-import AudioEngine
 import androidx.core.os.bundleOf
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -68,6 +67,14 @@ class ExpoTwoWayAudioModule : Module() {
 
          Function("isPlaying") {
              audioEngine?.isPlaying ?: false
+         }
+
+         Function("clearPendingPlayback") {
+             audioEngine?.clearPendingPlayback()
+         }
+
+         Function("stopPlayback") {
+             audioEngine?.stopPlayback()
          }
 
         Function("getMicrophoneModeIOS") {

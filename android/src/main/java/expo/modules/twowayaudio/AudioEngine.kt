@@ -1,3 +1,5 @@
+package expo.modules.twowayaudio
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
@@ -31,6 +33,7 @@ class AudioEngine (context: Context) {
     private lateinit var audioTrack: AudioTrack
     private var audioFocusRequest: AudioFocusRequest? = null
     private val audioSampleQueue: Queue<ByteArray> = LinkedList()
+    private val playbackLock = Any()
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private val executorServiceMicrophone = Executors.newFixedThreadPool(1)
@@ -284,9 +287,43 @@ class AudioEngine (context: Context) {
 
     fun playPCMData(data: ByteArray, sampleRate: Int) {
         ensureAudioTrack(sampleRate)
-        audioSampleQueue.add(data)
+        synchronized(playbackLock) {
+            audioSampleQueue.add(data)
+        }
         if (!isPlaying) {
             playAudioFromSampleQueue()
+        }
+    }
+
+    /**
+     * Drops PCM chunks not yet written to [AudioTrack]; flushes the hardware buffer.
+     * Mirrors the queue-drain part of Mykin's playback interrupt.
+     */
+    fun clearPendingPlayback() {
+        synchronized(playbackLock) {
+            audioSampleQueue.clear()
+        }
+        flushAudioTrack()
+        onOutputVolumeCallback?.invoke(0.0F)
+    }
+
+    /**
+     * Same as [clearPendingPlayback] for this engine — there is a single assistant stream and
+     * no per-turn filtering (cf. Mykin `stopSound` / `interruptSound`).
+     */
+    fun stopPlayback() {
+        clearPendingPlayback()
+    }
+
+    private fun flushAudioTrack() {
+        if (!this::audioTrack.isInitialized) return
+        if (audioTrack.state == AudioTrack.STATE_UNINITIALIZED) return
+        try {
+            audioTrack.pause()
+            audioTrack.flush()
+            audioTrack.play()
+        } catch (e: Exception) {
+            Log.e("AudioEngine", "flushAudioTrack", e)
         }
     }
 
@@ -294,15 +331,13 @@ class AudioEngine (context: Context) {
         executorServicePlayback.execute{
             isPlaying = true
             try {
-                while (audioSampleQueue.isNotEmpty()){
-                    val data = audioSampleQueue.poll()
-                    if (data != null){
-                        playSample(data)
-                        val audioVolume = calculateRMSLevel(data)
-                        onOutputVolumeCallback?.invoke(audioVolume)
-                    }else{
-                        break
-                    }
+                while (true) {
+                    val data = synchronized(playbackLock) {
+                        audioSampleQueue.poll()
+                    } ?: break
+                    playSample(data)
+                    val audioVolume = calculateRMSLevel(data)
+                    onOutputVolumeCallback?.invoke(audioVolume)
                 }
             }catch (e: Exception){
                 Log.e("AudioEngine", "Error playing audio", e)

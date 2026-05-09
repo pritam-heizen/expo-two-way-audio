@@ -23,6 +23,18 @@ export function isRecording(): boolean {
   return ExpoTwoWayAudioModule.isRecording();
 }
 
+export function isPlaying(): boolean {
+  return ExpoTwoWayAudioModule.isPlaying();
+}
+
+export function clearPendingPlayback(): void {
+  return ExpoTwoWayAudioModule.clearPendingPlayback();
+}
+
+export function stopPlayback(): void {
+  return ExpoTwoWayAudioModule.stopPlayback();
+}
+
 export function tearDown() {
   return ExpoTwoWayAudioModule.tearDown();
 }
