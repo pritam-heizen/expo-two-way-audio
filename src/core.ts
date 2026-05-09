@@ -1,4 +1,4 @@
-import { type PermissionResponse, createPermissionHook } from "expo-modules-core";
+import { type PermissionResponse } from "expo-modules-core";
 import ExpoTwoWayAudioModule from "./ExpoTwoWayAudioModule";
 
 export type SampleRate = 16000 | 24000;
@@ -21,6 +21,18 @@ export function toggleRecording(val: boolean): boolean {
 
 export function isRecording(): boolean {
   return ExpoTwoWayAudioModule.isRecording();
+}
+
+export function isPlaying(): boolean {
+  return ExpoTwoWayAudioModule.isPlaying();
+}
+
+export function clearPendingPlayback(): void {
+  return ExpoTwoWayAudioModule.clearPendingPlayback();
+}
+
+export function stopPlayback(): void {
+  return ExpoTwoWayAudioModule.stopPlayback();
 }
 
 export function tearDown() {

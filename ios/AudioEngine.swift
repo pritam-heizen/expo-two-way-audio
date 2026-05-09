@@ -182,6 +182,29 @@ class AudioEngine {
         }
     }
     
+    /// Clears app-side pending output. This engine schedules PCM directly on `speechPlayer`,
+    /// so clearing pending playback requires stopping the player node (same as `stopPlayback`).
+    // @PUSHED_WITHOUT_COMPILE - TODO: remove after compiling
+    func clearPendingPlayback() {
+        resetSpeechPlaybackOutput()
+    }
+
+    /// Stops scheduled/output speech immediately; mirrors Mykin `ExpoPlayAudioStream.stopSound`.
+    // @PUSHED_WITHOUT_COMPILE - TODO: remove after compiling
+    func stopPlayback() {
+        resetSpeechPlaybackOutput()
+    }
+
+    // @PUSHED_WITHOUT_COMPILE - TODO: remove after compiling
+    private func resetSpeechPlaybackOutput() {
+        if speechPlayer.isPlaying {
+            speechPlayer.pause()
+            speechPlayer.stop()
+        }
+        speechPlayer.play()
+        onOutputVolumeCallback?(0.0)
+    }
+
     func playPCMData(_ pcmData: Data, sampleRate: Int) {
         // Looks like we don't get a proper AEC for the very first chunks of audio that we play.
         // To work around this, we will discard microphone input for the first few milliseconds.
