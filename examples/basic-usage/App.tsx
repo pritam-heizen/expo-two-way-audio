@@ -11,10 +11,41 @@ import {
   useIsRecording,
   useMicrophonePermissions,
 } from "@speechmatics/expo-two-way-audio";
-import { Button, StyleSheet, Text, View } from "react-native";
-import { Platform } from "react-native";
+import {
+  Alert,
+  Button,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const RECORDING_SLOT_COUNT = 3;
+/** Bytes per second for 16 kHz mono 16-bit PCM */
+const PCM_BYTES_PER_SEC = 16000 * 2;
+const PLAYBACK_CHUNK_BYTES = 4096;
+
+function concatUint8Chunks(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
+}
+
+function playPcmInChunks(pcm: Uint8Array) {
+  for (let i = 0; i < pcm.length; i += PLAYBACK_CHUNK_BYTES) {
+    const end = Math.min(i + PLAYBACK_CHUNK_BYTES, pcm.length);
+    playPCMData(pcm.subarray(i, end));
+  }
+}
 
 export default function App() {
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -22,10 +53,14 @@ export default function App() {
 
   if (!micPermission?.granted) {
     return (
-      <View style={styles.container}>
+      <View style={styles.permissionGate}>
         <Text>Mic permission: {micPermission?.status}</Text>
         <Button
-          title={micPermission?.canAskAgain ? "Request permission" : "Cannot request permissions"}
+          title={
+            micPermission?.canAskAgain
+              ? "Request permission"
+              : "Cannot request permissions"
+          }
           disabled={!micPermission?.canAskAgain}
           onPress={requestMicPermission}
         />
@@ -40,9 +75,22 @@ export function Testbed() {
   const [audioInitialized, setAudioInitialized] = useState(false);
   const [inputVolumeLevel, setInputVolumeLevel] = useState(0.0);
   const [outputVolumeLevel, setOutputVolumeLevel] = useState(0.0);
-  const micMode = Platform.OS === "ios" ? getMicrophoneModeIOS() : "NO_MIC_MODE_IN_ANDROID";
+  const [playbackSource, setPlaybackSource] = useState<"demo" | "slot">("demo");
+  const [selectedSlot, setSelectedSlot] = useState(0);
+  const [slotRecordings, setSlotRecordings] = useState<(Uint8Array | null)[]>(
+    () => Array.from({ length: RECORDING_SLOT_COUNT }, () => null)
+  );
+  const [isCapturingSlot, setIsCapturingSlot] = useState(false);
 
-  const playAudio = () => {
+  const captureRef = useRef<{ active: boolean; chunks: Uint8Array[] }>({
+    active: false,
+    chunks: [],
+  });
+
+  const micMode =
+    Platform.OS === "ios" ? getMicrophoneModeIOS() : "NO_MIC_MODE_IN_ANDROID";
+
+  const playHardcodedDemo = useCallback(() => {
     for (const dataChunk of audioData) {
       for (const audioChunk of dataChunk.audio) {
         const buffer = Buffer.from(audioChunk, "base64");
@@ -50,29 +98,32 @@ export function Testbed() {
         playPCMData(pcmData);
       }
     }
-  };
+  }, []);
 
   const isRecording = useIsRecording();
 
   useExpoTwoWayAudioEventListener(
     "onMicrophoneData",
     useCallback<MicrophoneDataCallback>((event) => {
-      console.log(`MIC DATA: ${event.data}`);
-    }, []),
+      const cap = captureRef.current;
+      if (cap.active && event.data?.byteLength) {
+        cap.chunks.push(new Uint8Array(event.data));
+      }
+    }, [])
   );
 
   useExpoTwoWayAudioEventListener(
     "onInputVolumeLevelData",
     useCallback<VolumeLevelCallback>((event) => {
       setInputVolumeLevel(event.data);
-    }, []),
+    }, [])
   );
 
   useExpoTwoWayAudioEventListener(
     "onOutputVolumeLevelData",
     useCallback<VolumeLevelCallback>((event) => {
       setOutputVolumeLevel(event.data);
-    }, []),
+    }, [])
   );
 
   useEffect(() => {
@@ -91,19 +142,140 @@ export function Testbed() {
     }
   }, []);
 
+  const handlePlay = useCallback(() => {
+    if (playbackSource === "demo") {
+      playHardcodedDemo();
+      return;
+    }
+    const pcm = slotRecordings[selectedSlot];
+    if (!pcm?.byteLength) {
+      Alert.alert(
+        "Empty slot",
+        `Slot ${selectedSlot + 1} has no recording yet.`
+      );
+      return;
+    }
+    playPcmInChunks(pcm);
+  }, [playbackSource, playHardcodedDemo, selectedSlot, slotRecordings]);
+
+  const startSlotCapture = useCallback(() => {
+    captureRef.current = { active: true, chunks: [] };
+    toggleRecording(true);
+    setIsCapturingSlot(true);
+  }, []);
+
+  const stopSlotCapture = useCallback(() => {
+    const { chunks } = captureRef.current;
+    captureRef.current = { active: false, chunks: [] };
+    const merged = concatUint8Chunks(chunks);
+    setSlotRecordings((prev) => {
+      const next = [...prev];
+      next[selectedSlot] = merged.byteLength ? merged : prev[selectedSlot];
+      return next;
+    });
+    setIsCapturingSlot(false);
+  }, [selectedSlot]);
+
+  if (!audioInitialized) {
+    return (
+      <View style={styles.container}>
+        <Text>Initializing audio…</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <View style={styles.buttonContainer}>
-        <Button title="Play audio" onPress={playAudio} />
-        <Button title={isRecording ? "Mute" : "Unmute"} onPress={handleToggleMute} />
-        {isRecording && <Button title="mic mode" onPress={handleMicToggle} />}
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      style={styles.scrollView}
+    >
+      <View style={styles.container}>
+        <Text style={styles.sectionTitle}>Playback source</Text>
+        <View style={styles.buttonContainer}>
+          <Button
+            title="Demo (hardcoded)"
+            onPress={() => setPlaybackSource("demo")}
+          />
+          <Button
+            title="Recorded slot"
+            onPress={() => setPlaybackSource("slot")}
+          />
+        </View>
+        <Text style={styles.hint}>
+          Active:{" "}
+          {playbackSource === "demo" ? "demo PCM" : `slot ${selectedSlot + 1}`}
+        </Text>
+
+        <Text style={styles.sectionTitle}>Recording slot</Text>
+        <View style={styles.slotRow}>
+          {[0, 1, 2].map((i) => (
+            <Pressable
+              key={i}
+              disabled={isCapturingSlot}
+              onPress={() => setSelectedSlot(i)}
+              style={[
+                styles.slotChip,
+                selectedSlot === i && styles.slotChipSelected,
+                isCapturingSlot && styles.slotChipLocked,
+              ]}
+            >
+              <Text style={styles.slotChipText}>{i + 1}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.buttonContainer}>
+          <Button title="Play" onPress={handlePlay} />
+        </View>
+
+        <Text style={styles.sectionTitle}>
+          Record to slot {selectedSlot + 1}
+        </Text>
+        <Text style={styles.hint}>
+          Mic data is captured while recording. You can press Play during
+          capture to test echo cancellation—the speaker can play while the mic
+          stays open.
+        </Text>
+        <View style={styles.buttonContainer}>
+          <Button
+            title={isCapturingSlot ? "Stop recording" : "Start recording"}
+            onPress={isCapturingSlot ? stopSlotCapture : startSlotCapture}
+            color={isCapturingSlot ? "#c62828" : undefined}
+          />
+        </View>
+
+        <View style={styles.buttonContainer}>
+          <Button
+            title={isRecording ? "Mute mic" : "Unmute mic"}
+            onPress={handleToggleMute}
+          />
+          {isRecording && Platform.OS === "ios" && (
+            <Button title="Mic mode (iOS)" onPress={handleMicToggle} />
+          )}
+        </View>
+
+        <View style={styles.volumeContainer}>
+          <Text>{`input: ${inputVolumeLevel}`}</Text>
+          <Text>{`output: ${outputVolumeLevel}`}</Text>
+          <Text>{isRecording ? micMode : "mic muted"}</Text>
+          <Text>
+            {isCapturingSlot ? "● capturing to buffer" : "○ not capturing"}
+          </Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>Saved clips</Text>
+        {slotRecordings.map((buf, i) => (
+          <Text key={i} style={styles.slotMeta}>
+            Slot {i + 1}:{" "}
+            {buf?.byteLength
+              ? `~${(buf.byteLength / PCM_BYTES_PER_SEC).toFixed(1)}s (${
+                  buf.byteLength
+                } bytes)`
+              : "empty"}
+          </Text>
+        ))}
       </View>
-      <View style={styles.volumeContainer}>
-        <Text>{`input:${inputVolumeLevel}`}</Text>
-        <Text>{`output:${outputVolumeLevel}`}</Text>
-        <Text>{isRecording ? micMode : "ready"}</Text>
-      </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -648,29 +820,87 @@ const audioData = [
 ];
 
 const styles = StyleSheet.create({
-  container: {
+  permissionGate: {
     flex: 1,
     backgroundColor: "#fff",
     alignItems: "center",
-    justifyContent: "flex-start",
-    paddingTop: 50,
-    paddingBottom: 50,
-  },
-  buttonContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    width: "100%",
-    marginBottom: 20,
-  },
-  volumeContainer: {
-    justifyContent: "space-around",
-    width: "100%",
-    marginBottom: 20,
+    justifyContent: "center",
+    padding: 24,
   },
   scrollView: {
     flex: 1,
-    width: "90%",
+    width: "100%",
+    backgroundColor: "#fff",
+  },
+  scrollContent: {
+    paddingTop: 48,
+    paddingBottom: 48,
+    alignItems: "center",
+  },
+  container: {
+    width: "92%",
+    backgroundColor: "#fff",
+    alignItems: "stretch",
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  hint: {
+    fontSize: 13,
+    color: "#444",
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  buttonContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-around",
+    gap: 8,
+    width: "100%",
+    marginBottom: 12,
+  },
+  slotRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  slotChip: {
+    minWidth: 52,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#bbb",
+    alignItems: "center",
+  },
+  slotChipSelected: {
+    borderColor: "#1565c0",
+    backgroundColor: "#e3f2fd",
+  },
+  slotChipLocked: {
+    opacity: 0.55,
+  },
+  slotChipText: {
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  slotMeta: {
+    fontSize: 14,
+    marginVertical: 4,
+    color: "#333",
+  },
+  volumeContainer: {
+    marginTop: 8,
+    marginBottom: 16,
+    padding: 12,
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#ddd",
+    borderRadius: 8,
+    width: "100%",
+    gap: 4,
   },
 });

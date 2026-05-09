@@ -1,4 +1,4 @@
-import { type PermissionResponse, createPermissionHook } from "expo-modules-core";
+import { type PermissionResponse } from "expo-modules-core";
 import ExpoTwoWayAudioModule from "./ExpoTwoWayAudioModule";
 
 export type SampleRate = 16000 | 24000;

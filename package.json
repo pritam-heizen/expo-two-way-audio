@@ -5,20 +5,25 @@
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "scripts": {
-    "build": "expo-module build",
-    "clean": "expo-module clean",
-    "lint": "expo-module lint",
-    "test": "expo-module test",
+    "build": "npx tsc --build",
+    "clean": "node -e \"require('fs').rmSync('build', { recursive: true, force: true })\"",
+    "lint": "bash -lc \"npm_config_user_agent=yarn ./node_modules/expo-module-scripts/bin/expo-module-lint\"",
+    "test": "bash -lc \"npm_config_user_agent=yarn ./node_modules/expo-module-scripts/bin/expo-module-test\"",
     "format": "biome check .",
     "format:fix": "biome check --write .",
     "typecheck": "tsc",
-    "prepare": "expo-module prepare",
-    "prepublishOnly": "expo-module prepublishOnly",
+    "prepare": "npm run clean && npm run build",
+    "prepublishOnly": "bash -lc \"npm_config_user_agent=yarn ./node_modules/expo-module-scripts/bin/expo-module-prepublishOnly\"",
     "expo-module": "expo-module",
     "open:ios": "xed examples/basic-usage/ios",
     "open:android": "open -a \"Android Studio\" examples/basic-usage/android"
   },
-  "keywords": ["react-native", "expo", "expo-two-way-audio", "ExpoTwoWayAudio"],
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-two-way-audio",
+    "ExpoTwoWayAudio"
+  ],
   "repository": "https://github.com/speechmatics/expo-two-way-audio",
   "bugs": {
     "url": "https://github.com/speechmatics/expo-two-way-audio/issues"
@@ -27,10 +32,10 @@
   "license": "MIT",
   "homepage": "https://github.com/speechmatics/expo-two-way-audio#readme",
   "devDependencies": {
-    "@biomejs/biome": "1.9.4",
-    "@types/react": "^18.0.25",
-    "expo-module-scripts": "^3.5.2",
-    "expo-modules-core": "^2.0.4"
+    "@biomejs/biome": "^2.4.14",
+    "@types/react": "^19.2.14",
+    "expo-module-scripts": "^4.1.10",
+    "expo-modules-core": "~55.0.25"
   },
   "peerDependencies": {
     "expo": "*",
